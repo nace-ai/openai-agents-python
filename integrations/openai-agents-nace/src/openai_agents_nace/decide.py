@@ -8,7 +8,6 @@ from typing import Any, Literal
 from nace_sdk import Choice, ChoiceAnswer, Noul, NoulAnswer, Score, ScoreAnswer, SystemOneResponse
 from nace_sdk import NaceError
 
-MODELS = frozenset({"drex-max", "drex-v2.0"})
 CHECK = "check"
 ROUTE = "route"
 
@@ -53,12 +52,18 @@ class RouteDecision:
     request_id: str | None
 
 
+MAX_QUESTIONS = {"drex-max": 16, "drex-v2.0": 512}
+
+
 def check_model(model: str) -> None:
-    if model not in MODELS:
-        raise ValueError(
-            "model must be 'drex-max' or 'drex-v2.0'. "
-            "drex-latest does not point at drex-max, so this package does not send it."
-        )
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model must be a non-empty model id")
+
+
+def check_questions(questions: Mapping[str, Any], model: str) -> None:
+    cap = MAX_QUESTIONS.get(model)
+    if cap is not None and len(questions) > cap:
+        raise ValueError(f"{model} accepts at most {cap} questions")
 
 
 def check_threshold(threshold: float) -> None:
@@ -75,6 +80,8 @@ def check_images(images: Sequence[Any] | None, model: str) -> list[Any] | None:
         raise ValueError("images must be a list, not a single string or bytes")
     if model != "drex-max":
         raise ValueError("images require model='drex-max'")
+    if len(images) > 8:
+        raise ValueError("drex-max accepts at most 8 images")
     for index, image in enumerate(images):
         if isinstance(image, str) and image.startswith(("http://", "https://", "file://", "/", "./", "~/")):
             raise ValueError(

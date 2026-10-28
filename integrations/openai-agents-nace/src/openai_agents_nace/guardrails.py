@@ -6,7 +6,7 @@ from typing import Any
 
 from agents import GuardrailFunctionOutput, InputGuardrail, OutputGuardrail
 from agents.tool_guardrails import ToolGuardrailFunctionOutput, ToolInputGuardrail
-from nace_sdk import Choice, ChoiceAnswer, NaceClient
+from nace_sdk import Choice, ChoiceAnswer, NaceClient, RetryPolicy
 
 from openai_agents_nace.decide import (
     CHECK,
@@ -17,6 +17,7 @@ from openai_agents_nace.decide import (
     build_check,
     check_images,
     check_model,
+    check_questions,
     check_threshold,
     judge,
     pick_route,
@@ -25,6 +26,16 @@ from openai_agents_nace.decide import (
 )
 
 CLIENT_INFO = "openai-agents-nace/0.1.0"
+
+
+def open_client(*, api_key: str | None = None, base_url: str | None = None) -> NaceClient:
+    return NaceClient(
+        api_key=api_key,
+        base_url=base_url,
+        client_info=CLIENT_INFO,
+        timeout=60,
+        retry=RetryPolicy(timeout=180),
+    )
 
 
 def drex_input_guardrail(
@@ -120,7 +131,7 @@ def drex_route(
     if not all(isinstance(name, str) and name for name in routes):
         raise ValueError("route names must be non-empty strings")
     question = Choice(instructions=instructions.strip(), criteria=dict(routes))
-    response = _call(client, model=model, state=state, name=ROUTE, question=question, images=images)
+    response = _call(client, model=model, state=state, questions={ROUTE: question}, images=images)
     answer = response.answers.get(ROUTE)
     if not isinstance(answer, ChoiceAnswer):
         raise ValueError("Drex response did not include a choice answer for the route question")
@@ -174,7 +185,7 @@ def _verdict(
     threshold: float,
     images: Sequence[Any] | None,
 ):
-    response = _call(client, model=model, state=state, name=CHECK, question=question, images=images)
+    response = _call(client, model=model, state=state, questions={CHECK: question}, images=images)
     return judge(response, select, threshold, CHECK)
 
 
@@ -183,15 +194,15 @@ def _call(
     *,
     model: str,
     state: Any,
-    name: str,
-    question: Any,
+    questions: Mapping[str, Any],
     images: Sequence[Any] | None,
 ):
+    check_questions(questions, model)
     wire_images = check_images(images, model)
     owns = client is None
-    active = client if client is not None else NaceClient(client_info=CLIENT_INFO)
+    active = client if client is not None else open_client()
     try:
-        return active.system_one(state, {name: question}, model=model, images=wire_images)
+        return active.system_one(state, questions, model=model, images=wire_images)
     finally:
         if owns:
             active.close()
