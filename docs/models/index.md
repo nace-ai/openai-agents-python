@@ -58,6 +58,68 @@ Pre-run routing selects the starting agent's model. It does not automatically se
 
 Direct Decisions calls are outside the Runner's model adapter. Their usage is available on the native response and is not automatically included in `RunResult.context_wrapper.usage` or an Agents SDK generation span. Manage the native client's lifetime with `async with AsyncOpenAI() as client`, as the examples do.
 
+## Drex
+
+Use the [Drex Python client](https://console.nace.ai/docs/developer-tools/python) when a guardrail needs the probability of a yes answer. The external Drex classifier does not implement the Agents SDK interface named `Model`. `drex_on_topic` calls `AsyncNaceClient.system_one`, then sets `tripwire_triggered` by comparing `answer.noul` with the threshold.
+
+Install `nace-sdk` version 0.4.0 or any later version. `AsyncNaceClient()` reads `NACE_API_KEY`. The snippet below passes `model="drex-v2.0"` to `system_one` because the call is text-only. A `system_one` call that includes images must pass `model="drex-max"`. The model id `drex-latest` is not an alias of the model id `drex-max`. If a `system_one` call omits the argument named `model`, `AsyncNaceClient` sends the model argument that the caller passed to the `AsyncNaceClient` constructor. If the constructor `model` argument is also omitted, `AsyncNaceClient` sends the value stored in the environment variable `NACE_DEFAULT_DECISION_MODEL`. It does not send the characters `NACE_DEFAULT_DECISION_MODEL` as a model id. If the environment variable named `NACE_DEFAULT_DECISION_MODEL` is unset, `AsyncNaceClient` sends the model id `drex-latest`.
+
+If the agent must not start until `system_one` returns, pass `run_in_parallel=False` to `@input_guardrail`. If `system_one` raises, the exception from `system_one` must stop the run. Do not turn an exception from `system_one` into `tripwire_triggered=False`.
+
+Use `drex_on_topic` only from a `Runner.run` call that passes a string and omits the argument named `session`. Do not call `Runner.run_streamed` when you use `drex_on_topic`. Do not pass a client-managed `Session` as the `Runner.run` argument named `session`. A client-managed `Session` is not an `AsyncNaceClient`. When the argument named `session` is omitted, `Runner.run` passes the caller's string argument to `drex_on_topic`. `Runner.run_streamed` passes a list to `drex_on_topic` even when the caller passed a string. Before `drex_on_topic` runs, a client-managed `Session` replaces the caller's string argument with a list of input items. `drex_on_topic` raises `UserError` when `input` is a list. `drex_on_topic` does not convert the list to text. `drex_on_topic` does not download attachments.
+
+```python
+from agents import (
+    Agent,
+    GuardrailFunctionOutput,
+    RunContextWrapper,
+    TResponseInputItem,
+    UserError,
+)
+from agents.decorators import input_guardrail
+from nace_sdk import AsyncNaceClient, Noul, RetryPolicy
+
+
+@input_guardrail(run_in_parallel=False)
+async def drex_on_topic(
+    ctx: RunContextWrapper[None],
+    agent: Agent,
+    input: str | list[TResponseInputItem],
+) -> GuardrailFunctionOutput:
+    if not isinstance(input, str):
+        raise UserError(
+            "drex_on_topic accepts only the string from a Runner.run call whose caller omitted the argument named session. "
+            "Runner.run_streamed passes a list to drex_on_topic. "
+            "When the caller passes a client-managed Session to Runner.run, Runner.run passes a list to drex_on_topic."
+        )
+    async with AsyncNaceClient(
+        timeout=60,
+        retry=RetryPolicy(timeout=180),
+        client_info="my-app/1.0.0",
+    ) as client:
+        response = await client.system_one(
+            input,
+            {"on_topic": Noul(instructions="Is this a customer support request?")},
+            model="drex-v2.0",
+        )
+    answer = response.nouls["on_topic"]
+    return GuardrailFunctionOutput(
+        output_info={"noul": answer.noul, "model": response.model},
+        tripwire_triggered=answer.noul < 0.5,
+    )
+
+
+agent = Agent(
+    name="Customer support agent",
+    instructions="You help customers with their questions.",
+    input_guardrails=[drex_on_topic],
+)
+```
+
+`answer.noul` is the probability of a yes answer to the `Noul` question named `on_topic`. The question text is the `instructions` argument of `Noul`. The question text is not the agent `instructions`. The comparison `answer.noul < 0.5` is an example. Choose the threshold based on requests in your application that you have labeled yes or no. `drex_on_topic` sends the caller's string argument as the argument named `state` to `system_one`.
+
+Pass `client_info` as one string that contains a name, a slash, and a version. The snippet uses `my-app/1.0.0`. When `client_info` is set, `AsyncNaceClient` sends the `client_info` value in the `X-Nace-Client` header. `timeout=60` limits each HTTP attempt to 60 seconds. That `timeout` argument is not `RetryPolicy(timeout=180)`. `RetryPolicy(timeout=180)` is the total time budget in seconds, not a per-retry limit. That time budget includes the first attempt and the waits between attempts. If the wait before a retry would reach or exceed the `RetryPolicy` timeout, `AsyncNaceClient` does not start that retry and re-raises the last error. `AsyncNaceClient` uses a delay from the header named `retry-after-ms` when that header has a usable delay, and uses the header named `Retry-After` only when `retry-after-ms` has no usable delay. If neither header gives a usable delay, `AsyncNaceClient` uses backoff. If the key named `on_topic` is missing from `response.nouls`, `response.nouls["on_topic"]` raises `KeyError`. Leave the `KeyError` uncaught. Nace response token usage stays on the Nace `response.usage` attribute. The Runner does not copy Nace `response.usage` into `RunResult.context_wrapper.usage`. The Runner also does not state a rule for model-call usage.
+
 ## Choosing a model setup
 
 Start with the simplest path that fits your setup:
