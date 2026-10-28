@@ -106,7 +106,7 @@ The public helpers send one question. The send path still rejects more than 16 q
 
 The package constructs `NaceClient` when you omit `client`, then closes that client. That client uses an HTTP timeout of 60 seconds, a retry budget of 180 seconds, and `X-Nace-Client: openai-agents-nace/0.1.0`. The SDK overwrites `User-Agent`, so this package does not set one. Pass `client` to reuse one. The call is synchronous. An async agent run blocks on it.
 
-`nace-sdk` 0.2.0 posts to `https://console.nace.ai`. The request docs are at [console.nace.ai/docs](https://console.nace.ai/docs). Notes that say `Authorization: Bearer $DREX_API_KEY` and `POST https://drex.nace.ai/v1/systemone` describe a different host. This package does not add a client for that host. If `NACE_API_KEY` is unset, `nace-sdk` 0.2.0 still accepts `DREX_API_KEY`. Set `NACE_API_KEY`. Set `NACE_BASE_URL` only when the deployment is not the console host.
+`nace-sdk` 0.4.0 posts to `https://console.nace.ai`. The request docs are at [console.nace.ai/docs](https://console.nace.ai/docs). Notes that say `Authorization: Bearer $DREX_API_KEY` and `POST https://drex.nace.ai/v1/systemone` describe a different host. This package does not add a client for that host. If `NACE_API_KEY` is unset, `nace-sdk` 0.4.0 still accepts `DREX_API_KEY`. Set `NACE_API_KEY`. Set `NACE_BASE_URL` only when the deployment is not the console host.
 
 A failed call raises `NaceError`. The guardrail does not turn that into a pass.
 
@@ -116,7 +116,7 @@ A failed call raises `NaceError`. The guardrail does not turn that into a pass.
 python -m pytest
 ```
 
-The tests mock `NaceClient.system_one`. They do not call the live API. Requires Python 3.10 or newer. Tested on Python 3.14 with `nace-sdk` 0.2.0 and `openai-agents` 0.24.0.
+The tests mock `NaceClient.system_one`. They do not call the live API. Requires Python 3.11 or newer, because `nace-sdk` 0.4.0 requires it. Tested on Python 3.12 with `nace-sdk` 0.4.0 and `openai-agents` 0.24.0.
 
 ## License
 
